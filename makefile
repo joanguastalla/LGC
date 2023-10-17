@@ -19,8 +19,7 @@ LIBS= -lm -lblas -llapack
 OMPLINK=-fopenmp
 
 #Object for compilation
-OBJ=modelling_2D.c
-
+OBJ=modelling_2D.o modelling_utils.o
 
 # Name of executable file
 MAIN=modelling
@@ -28,7 +27,7 @@ MAIN=modelling
 all: $(MAIN) 
 	@echo Compiling executable $(MAIN)
 
-%.o: %.c $(HEADER)
+%.o: %.c 
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 $(MAIN): $(OBJ)  
@@ -36,7 +35,5 @@ $(MAIN): $(OBJ)
 
 
 
-
-
 clean:
-	rm -f *.o
+	rm -f *.o $(MAIN)
