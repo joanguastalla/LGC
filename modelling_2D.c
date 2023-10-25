@@ -12,26 +12,31 @@
 
 
 int main(){
-       
-// Declaracao de Variaveis
+
+// Declaration of variables
     
-	// Parametros do modelo original 
+
+// wavefield 
+	float* p1,*p2;
+// Parameters on original velocity model 
     int nx,nz;    
 	float dx,dz,x0,z0;
 	float* vel;
 
-	// Parametros do modelo extendido
+// Parameters on extended velocity model
 	int nxx,nzz;
 	struct b border;
 	float* velextend;
 	
-	// Parametros de aquisição
+// Aquisition parameters
 	int it0;
-	float xfmax,xfmin,dxf,zf,xg_offset_min,xg_offset_max,dxg,zg ;
+	int isrc,isx,isz,idxs,nshots;
+	int* igeo;
+	float xsmax,xsmin,dxs,zs,xg_offset_min,xg_offset_max,dxg,zg ;
 	float freq,ttotal;
 	float* ricker;
-
-	// Parametros de estabilidade
+	
+// Stability parameters
 	int ns,nt,ndt;
 	float maxv,minv;
 	float dxmax,dt;
@@ -39,37 +44,40 @@ int main(){
 	float deriv2_sum=0;
 
 
-	// Ler o modelo de velocidade
-    FILE* velfile;
+// Directories for reading or writing files  
+    char* param_dir;
+	char* velbin;
+    char* velhdr;
+	char* rickerdir;
+    char* velextend_path;
+	param_dir="/export/home/joan/ProjetoFWI/param.txt" ;
+    velbin = "/export/home/joan/ProjetoFWI/models/Vel.bin";
+	velhdr = "/export/home/joan/ProjetoFWI/models/Vel.txt";
+	velextend_path="./velextend.bin";
+	rickerdir="/export/home/joan/ProjetoFWI/models/ricker.bin";
+// File pointers to open files
+	FILE* velfile;
     FILE* velfile_hdr;
     FILE* velwrite;
     FILE* param;
-	char* param_dir;
-	char* velbin;
-    char* velhdr;
-    char* velextend_path;
+	FILE* ricker_bin;	
     // Alocação de matrizes e vetores
     
-    //Leitura do modelo de velocidade: hdr e bin
-    velhdr = "/export/home/joan/ProjetoFWI/models/Vel.txt";
-    velbin = "/export/home/joan/ProjetoFWI/models/Vel.bin";
-    param_dir="/export/home/joan/ProjetoFWI/param.txt" ;
-	velfile_hdr=fopen(velhdr,"r");    
+//Leitura do modelo de velocidade: hdr e bin
+    velfile_hdr=fopen(velhdr,"r");    
     velfile=fopen(velbin,"rb");
 	param=fopen(param_dir,"r");
-	fscanf(param,"%f %f %f %f %f %f %f %f %f %f",&xfmax,&xfmin,&dxf,&zf,&xg_offset_min,&xg_offset_max,&dxg,&zg,&freq,&ttotal);
+	fscanf(param,"%f %f %f %f %f %f %f %f %f %f",&xsmax,&xsmin,&dxs,&zs,&xg_offset_min,&xg_offset_max,&dxg,&zg,&freq,&ttotal);
     printf("Print dos parametros:  %f \n %f \n %f \n %f \n %f \n %f \n %f \n %f \n  %f \n %f \n",
-			xfmax,xfmin,dxf,zf,xg_offset_min,xg_offset_max,dxg,zg,freq,ttotal);
+			xsmax,xsmin,dxs,zs,xg_offset_min,xg_offset_max,dxg,zg,freq,ttotal);
 	fscanf(velfile_hdr,"%i %i %f %f %f %f",&nz,&nx,&z0,&x0,&dz,&dx);
     
 	vel=malloc(sizeof(float)*nx*nz);
 	fread(vel,sizeof(float),nx*nz,velfile);
     fclose(velfile);
     fclose(velfile_hdr);
-    //printf("nz= %i nx= %i z0=%f x0=%f dz=%f dx=%f \n",nz,nx,z0,x0,dz,dx);
-    //printf("v0=%f v1=%f ", vel[1], vel[500]);   
   
-    // Extending velocity model *******************************************
+// Extending velocity model *******************************************
     border.nb=50;
 	nxx=2*border.nb + nx;
     nzz=2*border.nb + nz;
@@ -80,13 +88,12 @@ int main(){
 	velextend=malloc(sizeof(float)*nxx*nzz);
    	velextension(velextend,vel,nx,nz,border,nxx,nzz);
 	
-	velextend_path="./velextend.bin";
     velwrite=fopen(velextend_path,"wb");
     fwrite(velextend,4,nxx*nzz,velwrite);    
    
 
 
-    //  Maximum and minimum of velocity model ******************************
+//  Maximum and minimum of velocity model ******************************
 	maxv=vel[0];
 	minv=vel[0];
 	for(int ii=0;ii<nx*nz;ii++){
@@ -98,7 +105,7 @@ int main(){
 		}
 	}
 
-	// Setting parameters dt,dx for stability of FD
+// Setting parameters dt,dx for stability of FD
 
 	ns= (int) (ttotal/dtrec) ;
 	ns+=1;
@@ -110,7 +117,7 @@ int main(){
 	ndt=(int)(dtrec/dt);
 	ndt+=1;
 
-	// Chosing dt for modelling to be a a divisor of dtrec
+// Chosing dt for modelling to be a a divisor of dtrec
 	if(ndt > 1){
 		dt=(dtrec/ndt);
 	}else{
@@ -122,8 +129,9 @@ int main(){
 	nt+=1;
 	ricker=malloc(sizeof(float)*nt);
 	
-	it0=0;
-	for(int it=it0;it<nt;it++){
+	// Half duration of ricker number of indexes it0	
+	it0 = floor(sqrt(6.0/PI)/(freq*dt)); 
+	for(int it=0;it<nt;it++){
 		ricker[it]=fricker((it-it0)*dt,freq);
 	}
 
@@ -133,7 +141,7 @@ int main(){
 	}
 	
 
-	// Scaling  extended velocity for computational resource economy
+// Scaling  extended velocity for computational resource economy
 
 	for(int ii=0;ii<nxx;ii++){
 		for(int jj=0;jj<nzz;jj++){
@@ -141,15 +149,40 @@ int main(){
 		}
 	}
 
+	
 
 	printf("Dt for stability: %.8f\n",dt);
 	printf("Dx for stability:%f\n",dxmax);
 	printf("ndt is:%i \n",ndt);
 	printf("Maximum value of velocity: %f \n",maxv);
 	printf("Minimum value of velocity: %f \n",minv);
+// Wavefield temporal evolution common-shot situation
+	p1=calloc(nxx*nzz,sizeof(float));
+	p2=calloc(nxx*nzz,sizeof(float));
+
+    ricker_bin=fopen(rickerdir,"wb");
+    fwrite(ricker,sizeof(float),nt,ricker_bin);
+	printf("nt:%d",nt);
+
+// Index of source in the model
+	
+	isx=(int) (xsmin/dx);   // starting at 0 sample
+	isz=(int) (zs/dz);	   // starting at 0 sample
+	isrc= isz + (border.izb+1) + nzz*(isx + border.ixb +1);
+	idxs=(int) (dxs/dx);
+	idxs=idxs*nzz;
+	nshots= (int) ((xsmax - xsmin)/dxs);
+	nshots+=1;
+	for(int is=0;is<nshots;is++){
+		isrc=isrc + idxs*is;
+		for(int it=0;it<nt;it++){
+				p2[isrc]+= pow(dx,2)*ricker[it]*velextend[isrc];
+	// Laplacian and field update
+		}	
+	}
+	
 	return 0;
 	
-
 
 }
 
