@@ -7,7 +7,7 @@ CC=gcc -O3
 # Compiler flags:
 # -g Add debuging information to the executable file
 # -Wall turn on most of compiler warnings
-CFLAGS=-Wall 
+CFLAGS=-Wall -pedantic
 
 # Define Library paths to include
 LFLAGS=-L/usr/lib/x86_64-linux-gnu 
