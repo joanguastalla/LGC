@@ -8,7 +8,7 @@
 #define dtrec 0.004
 #define sec2ms 1.0e6
 #define cfl 0.25
-#define nderiv2 8
+#define nderiv2 3
 
 
 int main(){
@@ -19,7 +19,8 @@ int main(){
 // wavefield 
 	float* p1,*p2;
 	float* pfield;
-	int iframe,im;
+	int iframe,im,ntrec;
+
 // Parameters on original velocity model 
     int nx,nz;    
 	float dx,dz,x0,z0;
@@ -42,8 +43,10 @@ int main(){
 // Stability parameters
 	int ns,nt,ndt;
 	float maxv,minv;
+
 	float dxmax,dt;
-	float deriv2[nderiv2]={-3.02359410, 1.75000000,-0.291666667, 0.0648148148,-0.0132575758,0.0021212122,-0.000226625227,0.0000118928690};
+	//float deriv2[nderiv2]={-3.02359410, 1.75000000,-0.291666667, 0.0648148148,-0.0132575758,0.0021212122,-0.000226625227,0.0000118928690};
+	float deriv2[nderiv2]={-5/2,4/3,-1/12};
 	float deriv2_sum=0;
 
 
@@ -59,7 +62,7 @@ int main(){
 	velhdr = "/export/home/joan/ProjetoFWI/models/Vel.txt";
 	velextend_path="./velextend.bin";
 	rickerdir="/export/home/joan/ProjetoFWI/models/ricker.bin";
-	moviedir="/export/home/joan/ProjetoFWI/models/wavemovie.bin";
+	moviedir="/scratch/joan/wavemovie.bin";
 // File pointers to open files
 	FILE* velfile;
     FILE* velfile_hdr;
@@ -119,7 +122,7 @@ int main(){
 	for(int ii=0;ii<nderiv2;ii++){
 		deriv2_sum+=abs(deriv2[ii]);
 	}
-	dt=cfl*sqrt(2.0/deriv2_sum)*dxmax/maxv;
+	dt=cfl*sqrt(2.0/deriv2_sum)*dx/maxv;
 	ndt=(int)(dtrec/dt);
 	ndt+=1;
 
@@ -134,6 +137,7 @@ int main(){
 	nt=(int)(ttotal/dt);
 	nt+=1;
 	ricker=malloc(sizeof(float)*nt);
+
 	
 	// Half duration of ricker number of indexes it0	
 	it0 = floor(sqrt(6.0/PI)/(freq*dt)); 
@@ -181,8 +185,9 @@ int main(){
 	nshots+=1;
 // Wave movie variables 
 wavemovie=fopen(moviedir,"wb");
-pfield=malloc(sizeof(float)*nx*nz*nt);
-int modulo;
+ntrec=(int) (nt/ndt);
+pfield=calloc(nx*nz,sizeof(float));
+float modulo;
 for(int is=0;is<nshots;is++){
 		for(int iswap=0;iswap<nxx*nzz;iswap++){
 					p1[iswap]=0.0;
@@ -191,13 +196,13 @@ for(int is=0;is<nshots;is++){
 		isrc=isrc + idxs*is;
 		iframe=0;
 		for(int it=0;it<nt;it++){
-				p1[isrc]=pow(dx,2)*ricker[it]*velextend[isrc];
-	//		 	printf("p1 no modelo:%f\n",p1[isrc]);	
+				p1[isrc]+=pow(dx,2.0)*ricker[it]*velextend[isrc];
+		//printf("p2 no modelo:%f\n",p2[isrc]);	
 	// Laplacian and field update
 				for(int ix=0;ix<nx;ix++){
 					for(int iz=0;iz<nz;iz++){
 						imodel=i0_model + iz + nzz*ix;
-						laplacian=deriv2[0]*p2[imodel];
+						laplacian=2*deriv2[0]*p2[imodel];
 						for(int iconv=1;iconv < nderiv2;iconv++){
 							laplacian+=deriv2[iconv]*p2[imodel - iconv];
 							laplacian+=deriv2[iconv]*p2[imodel + iconv];
@@ -212,22 +217,35 @@ for(int is=0;is<nshots;is++){
 					p2[iswap]=p1[iswap];
 					p1[iswap]=dswap;
 				}
-			modulo=(int) fmod(it,ndt);
-			if(modulo==0){
-				printf("Cheguei no if");
+			modulo=fmod(it,ndt);
+			if((int) modulo==0){
 				im=0;
 				for(int imx=0;imx<nx;imx++){
 					for(int imz=0;imz<nz;imz++){
-						pfield[im + iframe*nx*nz]=p1[i0_model + imz + imx*nzz];
-						im++;
+						//printf("im:%d\n",im);
+						//printf("index p1: %d\n",i0_model + imz + imx*nzz);
+						//printf("index p2: %d\n",im + iframe*nx*nz);
+						//printf("value p1:%f\n",p1[im + iframe*nx*nz]);
+						//printf("value pfield:%f\n",pfield[im + iframe*nx*nz]);
+						pfield[im]=p1[i0_model + imz + imx*nzz];
+						im+=1;
 					}
 				}
-				iframe++;	
-		}
+				fwrite(pfield,sizeof(float),nx*nz,wavemovie);
+			}
 	}
 }
 	printf("Tentando escrever");
-	fwrite(pfield,sizeof(float),nx*nz*nt,wavemovie);
+//	int ntref;
+//	float* paux;
+//	FILE* waveim;
+//	waveim=fopen("~/ProjetoFWI/models/waveimage.bin","wb");
+//	paux=malloc(sizeof(float)*nx*nz);
+//	/for(int ii=0;ii<nx*nz;ii++){
+//		ntref=(int) 0.3/dtrec;
+//		paux[ii]=pfield[ii + nx*nz*ntref];
+//	}
+//	fwrite(paux,sizeof(float),nx*nz,waveim);
 	return 0;
 }
 
