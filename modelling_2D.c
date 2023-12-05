@@ -85,9 +85,13 @@ int main(){
 	fread(vel,sizeof(float),nx*nz,velfile);
     fclose(velfile);
     fclose(velfile_hdr);
-  
+  	for (int i = 0;i < nx*nz; ++i) {
+  		vel[i]=2000;
+  	}
+
+
 // Extending velocity model *******************************************
-    border.nb=50;
+    border.nb=150;
 	nxx=2*border.nb + nx;
     nzz=2*border.nb + nz;
     border.ixb=border.nb -1;
@@ -95,7 +99,7 @@ int main(){
 	border.ize=nzz - border.nb;
    	
 	velextend=malloc(sizeof(float)*nxx*nzz);
-   	velextension(velextend,vel,nx,nz,border,nxx,nzz);
+	velextension(velextend,vel,nx,nz,border,nxx,nzz);
 	
     velwrite=fopen(velextend_path,"wb");
     fwrite(velextend,4,nxx*nzz,velwrite);    
@@ -188,6 +192,36 @@ wavemovie=fopen(moviedir,"wb");
 ntrec=(int) (nt/ndt);
 pfield=calloc(nx*nz,sizeof(float));
 float modulo;
+// Wave propagation in borders
+int ix,iz;
+float gamma_x[nxx];
+float gamma_z[nzz];
+float gamma, mgamma, invpgamma, beta;
+beta=PI*freq*dt;
+for(iz = 0; iz < nzz; ++iz) {
+	gamma_z[iz]=0.0;
+}
+for (int ix = 0; ix < nxx; ++ix) {
+	gamma_x[ix]=0.0;
+}
+
+for (ix = 0; ix < border.nb; ++ix) {
+	gamma=beta*pow((((float) (ix+1))/((float) border.nb)),2.0);
+	gamma_x[border.ixb - ix]=gamma;
+	gamma_x[(border.ixb + nx + 1) + ix]=gamma;
+}	
+
+for (iz = 0; iz < border.nb; ++iz) {
+	gamma=beta*pow((((float) (iz+1))/((float) border.nb)),2.0);
+	gamma_z[border.izb - iz]=gamma;
+	gamma_z[(border.izb + nz + 1) + iz]=gamma;
+}	
+
+
+
+
+
+// Wave evolution without borders
 for(int is=0;is<nshots;is++){
 		for(int iswap=0;iswap<nxx*nzz;iswap++){
 					p1[iswap]=0.0;
@@ -196,11 +230,14 @@ for(int is=0;is<nshots;is++){
 		isrc=isrc + idxs*is;
 		iframe=0;
 		for(int it=0;it<nt;it++){
-				p1[isrc]+=pow(dx,2.0)*ricker[it]*velextend[isrc];
+				p1[isrc]+= -pow(dx,2.0)*ricker[it]*velextend[isrc];
 		//printf("p2 no modelo:%f\n",p2[isrc]);	
 	// Laplacian and field update
-				for(int ix=0;ix<nx;ix++){
-					for(int iz=0;iz<nz;iz++){
+				for(int ix=(nderiv2-1);ix<(nxx-nderiv2);ix++){
+					for(int iz=(nderiv2-1);iz<(nzz-nderiv2);iz++){
+						gamma=gamma_x[ix] + gamma_z[iz];
+						mgamma=-(1-gamma)/(1+gamma);
+						invpgamma= 0.5*(1-mgamma);
 						imodel=i0_model + iz + nzz*ix;
 						laplacian=2*deriv2[0]*p2[imodel];
 						for(int iconv=1;iconv < nderiv2;iconv++){
@@ -209,7 +246,10 @@ for(int is=0;is<nshots;is++){
 							laplacian+=deriv2[iconv]*p2[imodel - nzz*iconv];
 							laplacian+=deriv2[iconv]*p2[imodel + nzz*iconv];
 						}
-						p1[imodel]=-p1[imodel] + 2.0*p2[imodel] + velextend[imodel]*laplacian;
+						p1[imodel]= mgamma*p1[imodel] + invpgamma*( 2.0*p2[imodel] +
+						velextend[imodel]*laplacian);
+					//	p1[imodel]= -p1[imodel] + ( 2.0*p2[imodel] +
+					//			velextend[imodel]*laplacian);
 					}	
 				}
 				for(int iswap=0;iswap<nxx*nzz;iswap++){
