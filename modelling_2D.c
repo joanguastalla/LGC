@@ -183,7 +183,7 @@ int main(){
 	isx=(int) (xsmin/dx);   // starting at 0 sample
 	isz=(int) (zs/dz);	   // starting at 0 sample
 	isrc= i0_model + isz +  nzz*isx;
-	idxs=(int) (dxs/dx);
+	idxs=(int)(dxs/dx);
 	idxs=idxs*nzz;
 	nshots=(int) ((xsmax - xsmin)/dxs);
 	nshots+=1;
@@ -201,7 +201,7 @@ beta=PI*freq*dt;
 for(iz = 0; iz < nzz; ++iz) {
 	gamma_z[iz]=0.0;
 }
-for (int ix = 0; ix < nxx; ++ix) {
+for (ix = 0; ix < nxx; ++ix) {
 	gamma_x[ix]=0.0;
 }
 
@@ -237,8 +237,8 @@ for(int is=0;is<nshots;is++){
 					for(int iz=(nderiv2-1);iz<(nzz-nderiv2);iz++){
 						gamma=gamma_x[ix] + gamma_z[iz];
 						mgamma=-(1-gamma)/(1+gamma);
-						invpgamma= 0.5*(1-mgamma);
-						imodel=i0_model + iz + nzz*ix;
+						invpgamma=0.5*(1-mgamma);
+						imodel= iz + nzz*ix;
 						laplacian=2*deriv2[0]*p2[imodel];
 						for(int iconv=1;iconv < nderiv2;iconv++){
 							laplacian+=deriv2[iconv]*p2[imodel - iconv];
@@ -246,7 +246,7 @@ for(int is=0;is<nshots;is++){
 							laplacian+=deriv2[iconv]*p2[imodel - nzz*iconv];
 							laplacian+=deriv2[iconv]*p2[imodel + nzz*iconv];
 						}
-						p1[imodel]= mgamma*p1[imodel] + invpgamma*( 2.0*p2[imodel] +
+						p1[imodel]= mgamma*p1[imodel] + invpgamma*(2.0*p2[imodel] +
 						velextend[imodel]*laplacian);
 					//	p1[imodel]= -p1[imodel] + ( 2.0*p2[imodel] +
 					//			velextend[imodel]*laplacian);
