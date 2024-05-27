@@ -9,7 +9,7 @@
 #define sec2ms 1.0e6
 #define cfl 0.25
 #define nderiv2 3
-
+#define NB 50
 
 int main(){
 
@@ -31,12 +31,14 @@ int main(){
 	struct b border;
 	float* velextend;
 	int i0_model,imodel;
-	float laplacian,dswap;
+	float laplacian;
+	float*	dswap;
 // Aquisition parameters
-	int it0;
+	int it0,ng,itrec;
 	int isrc,isx,isz,idxs,nshots;
 	int* igeo;
-	float xsmax,xsmin,dxs,zs,xg_offset_min,xg_offset_max,dxg,zg ;
+	float* prec;
+	float xsmax,xsmin,dxs,zs,hmin,hmax,dxh,zg;
 	float freq,ttotal;
 	float* ricker;
 	
@@ -46,7 +48,7 @@ int main(){
 
 	float dxmax,dt;
 	//float deriv2[nderiv2]={-3.02359410, 1.75000000,-0.291666667, 0.0648148148,-0.0132575758,0.0021212122,-0.000226625227,0.0000118928690};
-	float deriv2[nderiv2]={-5/2,4/3,-1/12};
+	float deriv2[nderiv2]={-5.0/2.0,4.0/3.0,-1.0/12.0};
 	float deriv2_sum=0;
 
 
@@ -57,12 +59,14 @@ int main(){
 	char* rickerdir;
     char* velextend_path;
 	char* moviedir;
+	char* sectiondir;
 	param_dir="/export/home/joan/ProjetoFWI/param.txt" ;
     velbin = "/export/home/joan/ProjetoFWI/models/Vel.bin";
 	velhdr = "/export/home/joan/ProjetoFWI/models/Vel.txt";
 	velextend_path="./velextend.bin";
 	rickerdir="/export/home/joan/ProjetoFWI/models/ricker.bin";
 	moviedir="/scratch/joan/wavemovie.bin";
+	sectiondir="/scratch/joan/section.bin";
 // File pointers to open files
 	FILE* velfile;
     FILE* velfile_hdr;
@@ -70,17 +74,21 @@ int main(){
     FILE* param;
 	FILE* ricker_bin;	
     FILE* wavemovie;
+	FILE* section;
 	// Alocação de matrizes e vetores
     
 //Leitura do modelo de velocidade: hdr e bin
     velfile_hdr=fopen(velhdr,"r");    
     velfile=fopen(velbin,"rb");
 	param=fopen(param_dir,"r");
-	fscanf(param,"%f %f %f %f %f %f %f %f %f %f",&xsmax,&xsmin,&dxs,&zs,&xg_offset_min,&xg_offset_max,&dxg,&zg,&freq,&ttotal);
-    printf("Print dos parametros:  %f \n %f \n %f \n %f \n %f \n %f \n %f \n %f \n  %f \n %f \n",
-			xsmax,xsmin,dxs,zs,xg_offset_min,xg_offset_max,dxg,zg,freq,ttotal);
+	fscanf(param,"%f %f %f %f %f %f %f %f %f %f",&xsmax,&xsmin,&dxs,&zs,&hmin,&hmax,&dxh,&zg,&freq,&ttotal);
 	fscanf(velfile_hdr,"%i %i %f %f %f %f",&nz,&nx,&z0,&x0,&dz,&dx);
     
+
+	ng=(int) (hmax - hmin)/dxh;
+	ng+=1;
+	igeo=malloc(sizeof(int)*ng);
+	prec=calloc(ng,sizeof(float));
 	vel=malloc(sizeof(float)*nx*nz);
 	fread(vel,sizeof(float),nx*nz,velfile);
     fclose(velfile);
@@ -91,7 +99,7 @@ int main(){
 
 
 // Extending velocity model *******************************************
-    border.nb=150;
+    border.nb=NB;
 	nxx=2*border.nb + nx;
     nzz=2*border.nb + nz;
     border.ixb=border.nb -1;
@@ -164,19 +172,28 @@ int main(){
 	}
 
 	
-
-	printf("Dt for stability: %.8f\n",dt);
-	printf("Dx for stability:%f\n",dxmax);
-	printf("ndt is:%i \n",ndt);
-	printf("Maximum value of velocity: %f \n",maxv);
-	printf("Minimum value of velocity: %f \n",minv);
+    printf("xsmax:%.1f\n",xsmax);
+    printf("xsmin:%.1f\n",xsmax);
+    printf("dxs:%.1f\n",dxs);
+    printf("zs:%.1f\n",zs);
+    printf("hmin:%.1f\n",hmin);
+    printf("hmax:%.1f\n",hmax);
+    printf("dxg:%.1f\n",dxh);
+    printf("zg:%.1f\n",zg);
+    printf("freq:%.1f\n",freq);
+    printf("ttotal:%.1f\n",ttotal);
+	printf("dt|stable: %.8f\n",dt);
+	printf("dx|stable:%.1f\n",dxmax);
+	printf("ndt:%d \n",ndt);
+	printf("max vel: %.1f \n",maxv);
+	printf("min vel: %.1f \n",minv);
 // Wavefield temporal evolution common-shot situation
 	p1=calloc(nxx*nzz,sizeof(float));
 	p2=calloc(nxx*nzz,sizeof(float));
     ricker_bin=fopen(rickerdir,"wb");
     i0_model=nzz*(border.ixb+1) + (border.izb + 1); 
 	fwrite(ricker,sizeof(float),nt,ricker_bin);
-	printf("nt:%d",nt);
+	printf("ns:%d",ns);
 
 // Index of source in the model
 	
@@ -184,7 +201,6 @@ int main(){
 	isz=(int) (zs/dz);	   // starting at 0 sample
 	isrc= i0_model + isz +  nzz*isx;
 	idxs=(int)(dxs/dx);
-	idxs=idxs*nzz;
 	nshots=(int) ((xsmax - xsmin)/dxs);
 	nshots+=1;
 // Wave movie variables 
@@ -219,19 +235,22 @@ for (iz = 0; iz < border.nb; ++iz) {
 
 
 
-
-
+section=fopen(sectiondir,"wb");
 // Wave evolution without borders
 for(int is=0;is<nshots;is++){
+		itrec=0;
 		for(int iswap=0;iswap<nxx*nzz;iswap++){
 					p1[iswap]=0.0;
 					p2[iswap]=0.0;
 		}
-		isrc=isrc + idxs*is;
+		isrc=isrc + nzz*idxs*is;
 		iframe=0;
+		for(int ig=0;ig<ng;ig++){
+			igeo[ig]=i0_model + (zg/dz) + nzz*(isx + idxs*is) + nzz*(hmin/dx)
+					 + ig*(dxh/dx)*nzz;
+		}
 		for(int it=0;it<nt;it++){
 				p1[isrc]+= -pow(dx,2.0)*ricker[it]*velextend[isrc];
-		//printf("p2 no modelo:%f\n",p2[isrc]);	
 	// Laplacian and field update
 				for(int ix=(nderiv2-1);ix<(nxx-nderiv2);ix++){
 					for(int iz=(nderiv2-1);iz<(nzz-nderiv2);iz++){
@@ -248,44 +267,64 @@ for(int is=0;is<nshots;is++){
 						}
 						p1[imodel]= mgamma*p1[imodel] + invpgamma*(2.0*p2[imodel] +
 						velextend[imodel]*laplacian);
-					//	p1[imodel]= -p1[imodel] + ( 2.0*p2[imodel] +
-					//			velextend[imodel]*laplacian);
 					}	
 				}
-				for(int iswap=0;iswap<nxx*nzz;iswap++){
-					dswap=p2[iswap];
-					p2[iswap]=p1[iswap];
-					p1[iswap]=dswap;
+				
+			
+			// One-way border condition
+	
+				for (iz = 0;iz<nz;iz++) {
+					for (ix = 0;ix<(nderiv2-1);ix++) {
+						// Left x-border
+						imodel=((nderiv2-2)-ix)*nzz + (border.nb + iz);
+						p1[imodel]=(1-sqrt(velextend[imodel]))*p2[imodel] + 
+	   					sqrt(velextend[imodel])*p2[imodel + nzz];
+						// Right x-border
+						imodel=((nxx-1)-ix)*nzz + (border.nb + iz);
+						p1[imodel]=(1-sqrt(velextend[imodel]))*p2[imodel] +
+	   					sqrt(velextend[imodel])*p2[imodel - nzz];
+					}
 				}
+				for(ix=0;ix<nx;ix++){
+					for(iz=0;iz<(nderiv2-1);iz++){
+						// Top z-border
+						imodel= (border.nb + ix)*nzz + iz;
+						p1[imodel]=(1-sqrt(velextend[imodel]))*p2[imodel] +
+	   					sqrt(velextend[imodel])*p2[imodel + 1];
+						// Bottom z-border
+						//imodel=(border.nb + ix)*nzz + ( (nzz-1) - (nderiv2-2) + iz);
+						imodel=(border.nb + ix)*nzz + ( (nzz-1) - iz);
+						p1[imodel]=(1-sqrt(velextend[imodel]))*p2[imodel] + 
+	   					 sqrt(velextend[imodel])*p2[imodel-1];
+					}
+				}
+			
 			modulo=fmod(it,ndt);
 			if((int) modulo==0){
+				for(int ig=0;ig < ng;ig++){
+						prec[itrec + ns*ig]=p1[igeo[ig]];
+				}
+				itrec+=1;
+
+				/* Wavemovie writing
 				im=0;
 				for(int imx=0;imx<nx;imx++){
 					for(int imz=0;imz<nz;imz++){
-						//printf("im:%d\n",im);
-						//printf("index p1: %d\n",i0_model + imz + imx*nzz);
-						//printf("index p2: %d\n",im + iframe*nx*nz);
-						//printf("value p1:%f\n",p1[im + iframe*nx*nz]);
-						//printf("value pfield:%f\n",pfield[im + iframe*nx*nz]);
 						pfield[im]=p1[i0_model + imz + imx*nzz];
 						im+=1;
 					}
 				}
 				fwrite(pfield,sizeof(float),nx*nz,wavemovie);
+				*/
 			}
+
+					dswap=p2;
+					p2=p1;
+					p1=dswap;
+		}
+		fwrite(prec,sizeof(float),ng*ns,section);
 	}
-}
-	printf("Tentando escrever");
-//	int ntref;
-//	float* paux;
-//	FILE* waveim;
-//	waveim=fopen("~/ProjetoFWI/models/waveimage.bin","wb");
-//	paux=malloc(sizeof(float)*nx*nz);
-//	/for(int ii=0;ii<nx*nz;ii++){
-//		ntref=(int) 0.3/dtrec;
-//		paux[ii]=pfield[ii + nx*nz*ntref];
-//	}
-//	fwrite(paux,sizeof(float),nx*nz,waveim);
+	fclose(section);
 	return 0;
 }
 
