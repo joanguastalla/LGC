@@ -43,9 +43,9 @@ void velextension(float* vex,float* v,int nx,int nz,struct b border,int nxx,int 
 		}	
 }
 
-float fricker(float t,float freq){
-		float beta=pow(PI*freq*t,2);
-		float ricker;	
-		ricker=(1.0 - 2*beta)*exp(-beta);
+double fricker(float t,float freq){
+		double beta=PI*freq*t;
+		double ricker;	
+		ricker=(-sqrt(2.0)*beta + 1.0)*(1.0 + sqrt(2.0)*beta)*exp(-(beta*beta));
 		return ricker;
 }
