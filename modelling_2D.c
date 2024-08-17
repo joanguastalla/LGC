@@ -10,7 +10,7 @@
 #define sec2ms 1.0e6
 #define cfl 0.25
 #define nderiv2 3
-#define NB 50
+#define NB 100
 			/*
 			// One-way border condition
 	
@@ -87,8 +87,10 @@ int main(){
 
 // wavefield 
 	float* p1,*p2;
-	float* pfield, *image,*p1aux,*precbackward;
+	float* ref;
+	float* pfield, *image,*p1aux;
 	float* pforward;
+	float* taper;
 	int iframe,im,ntrec;
 
 // Parameters on original velocity model 
@@ -131,9 +133,12 @@ int main(){
 	char* moviedir;
 	char* sectiondir;
 	char* imagedir;
-	param_dir="/export/home/joan/ProjetoFWI/param.txt" ;
-    velbin = "/export/home/joan/ProjetoFWI/models/refplane.bin";
-	velhdr = "/export/home/joan/ProjetoFWI/models/Vel.txt";
+//	param_dir="/export/home/joan/ProjetoFWI/param.txt" ;
+	param_dir="/export/home/joan/Seismic-Datasets/BP/geometry.txt" ;
+ //   velbin = "/export/home/joan/ProjetoFWI/models/refplane.bin";
+//	velhdr = "/export/home/joan/ProjetoFWI/models/Vel.txt";
+	velbin="/export/home/joan/Seismic-Datasets/BP/vp.rsf@";
+	velhdr="/export/home/joan/Seismic-Datasets/BP/vel_hdr.txt";
 	velextend_path="./velextend.bin";
 	rickerdir="/export/home/joan/ProjetoFWI/models/ricker.bin";
 	moviedir="/scratch/joan/wavemovie.bin";
@@ -177,8 +182,8 @@ int main(){
 	velextend=malloc(sizeof(float)*nxx*nzz);
 	velextension(velextend,vel,nx,nz,border,nxx,nzz);
 	
-  //  velwrite=fopen(velextend_path,"wb");
-  //  fwrite(velextend,4,nxx*nzz,velwrite);    
+    velwrite=fopen(velextend_path,"wb");
+    fwrite(velextend,4,nxx*nzz,velwrite);    
    
 
 
@@ -282,7 +287,6 @@ int main(){
 	idxs=(int)(dxs/dx);
 	nshots=(int) ((xsmax - xsmin)/dxs);
 	nshots+=1;
-	precbackward=calloc(nt*nshots,sizeof(float));
 // Wave movie variables 
 ntrec=(int) (nt/ndt);
 pfield=calloc(nx*nz*nt_rtm,sizeof(float));
@@ -326,7 +330,7 @@ wavemovie=fopen(moviedir,"wb");
 for(int is=0;is<nshots;is++){
 		printf("is:%d-%d\n",is,nshots);
 		itrec=it_rtm=0;
-		memset(pfield,0,nx*nz*nt_rtm);
+		memset(pfield,0,nx*nz*nt_rtm*sizeof(float));
 		for(int iswap=0;iswap<nxx*nzz;iswap++){
 					p1[iswap]=0.0;
 					p2[iswap]=0.0;
@@ -368,7 +372,6 @@ for(int is=0;is<nshots;is++){
 			for(int ig=0;ig < ng;ig++){
 				pforward[it + nt*ig]=p1[igeo[ig]];
 			}
-			precbackward[it]=p1[isrc];
 			modulo=fmod(it,ndt_rtm);
 			if((int) modulo==0){
 				// Wavemovie writing
@@ -429,10 +432,61 @@ for(int is=0;is<nshots;is++){
 			
 	}
 }
-	fclose(wavemovie);
-	IMAGE=fopen(imagedir,"wb");
-	fwrite(image,sizeof(float),nx*nz,IMAGE);
-	fclose(IMAGE);
-	return 0;
+
+
+
+
+ref=malloc(sizeof(float)*nx*nz);
+// Laplacian filter on image
+for(int imx=(nderiv2-1);imx < (nx-nderiv2); ++imx){
+	for(int imz=(nderiv2-1);imz<(nz-nderiv2); ++imz){
+				imodel=imz + nz*imx;
+				laplacian=2*deriv2[0]*image[imodel];
+				for(int iconv=1;iconv < nderiv2;iconv++){
+					laplacian+=deriv2[iconv]*image[imodel - iconv];
+					laplacian+=deriv2[iconv]*image[imodel + iconv];
+					laplacian+=deriv2[iconv]*image[imodel - nz*iconv];
+					laplacian+=deriv2[iconv]*image[imodel + nz*iconv];
+				}
+				ref[imodel]=laplacian;
+	}
+}
+// Tappering
+taper=calloc(nz,sizeof(float));
+int taper_end,taper_begin,ntaper;
+FILE* TAPER;
+char* taper_dir="./taper.bin";
+taper_begin=21;
+taper_end=51;
+ntaper=taper_end-taper_begin;
+for(int ii=taper_end;ii<nz;ii++){
+	taper[ii]=1.0;
+}
+
+for(int ii=0;ii<ntaper;ii++){
+	taper[taper_begin + ii]=exp((ii-ntaper)/dz);
+}
+for(int ii=0;ii<nz;ii++){
+	printf("taper[%d]=%f\n",ii,taper[ii]);
+}
+
+
+for (int imx=0;imx<nx;++imx) {
+	for (int imz=0;imz< nz; ++imz){
+		ref[imx*nz + imz]=ref[imx*nz + imz]*taper[imz];
+	}	
+}
+
+TAPER=fopen(taper_dir,"wb");
+fwrite(taper,sizeof(float),nz,TAPER);
+
+
+free(p1);
+free(p2);
+fclose(wavemovie);
+IMAGE=fopen(imagedir,"wb");
+fwrite(ref,sizeof(float),nx*nz,IMAGE);
+fclose(IMAGE);
+return 0;
 }
 

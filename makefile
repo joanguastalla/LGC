@@ -2,7 +2,7 @@
 .RECIPEPREFIX= 
 
 #Define C Compiler
-CC=gcc -Ofast -march=native 
+CC=gcc -O3 -march=native 
 
 # Compiler flags:
 # -g Add debuging information to the executable file
@@ -20,20 +20,26 @@ OMPLINK=-fopenmp
 
 #Object for compilation
 OBJ=modelling_2D.o modelling_utils.o
+OBJFD=modelling_utils.o fd_2d.o
+
 
 MYOBJ=mymodelling_2D.o modelling_utils.o
 
 # Name of executable file
-MAIN=modelling 
+FD=fd2d
+MAIN=modelling
 MYMAIN=mymodeling
 
-all: $(MAIN)  $(MYMAIN)
+all: $(MAIN)  $(MYMAIN) $(FD)
 	@echo Compiling executable $(MAIN)
 
 %.o: %.c 
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 $(MAIN): $(OBJ)  
+	$(CC) -o $@ $^ $(LIBS) $(LFLAGS)
+
+$(FD): $(OBJFD)
 	$(CC) -o $@ $^ $(LIBS) $(LFLAGS)
 
 mymodelling_2D.o:mymodelling_2D.c

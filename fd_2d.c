@@ -1,67 +1,14 @@
-#include <stdio.h>      // Input and output
-#include <stdlib.h>     // Pointers
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <math.h>       // Math functions
-#include <lapack.h>     // Linear algebra
+#include <math.h>
 #include "modelling_utils.h"
 #define  PI 3.14159265358979323846264338328
-#define dtrec 0.004
-#define dtrtm 0.004
+#define nderiv2 3
+#define dtrec 4e-3
 #define sec2ms 1.0e6
 #define cfl 0.25
-#define nderiv2 3
 #define NB 100
-typedef struct b{
-	int ixb;
-	int izb;
-	int ize;
-	int nb;
-};
-void velextension(float* vex,float* v,int nx,int nz,struct b border,int nxx,int nzz){
-	int i0;
-	i0=(border.ixb+1)*nzz + border.izb+1;
-	
-	for(int ii=0;ii<nx;ii++){
-            for(int jj=0;jj<nz;jj++){
-                vex[(int) (i0 + ii*nzz + jj)]=v[ii*nz + jj];
-            }
-    }
-    // Border at the left side
-        for(int ii=0;ii<(border.ixb + 1);ii++){
-            for(int jj=0;jj<nz;jj++){
-					vex[border.izb +  1 + ii*nzz + jj]=v[jj];
-             }
-        }
-        
-    // Border at the right side
-        for(int ii=0;ii<(border.ixb+1);ii++){
-          for(int jj=0;jj<nz;jj++){
-            vex[ (nzz*( border.ixb+1 +nx) +  border.izb + 1) + ii*nzz + jj]=v[jj];
-          }
-        }
-   
-	// Border at the top side
-		for (int ii=0;ii<nxx;ii++){
-			for(int jj=0;jj<(border.izb+1);jj++){
-				vex[jj + ii*nzz] = vex[(border.izb+1) + ii*nzz];
-			}
-		}	
-	// Border at the bottom side
-		for (int ii=0;ii<nxx;ii++){
-			for(int jj=border.ize;jj<nzz;jj++){
-				vex[jj + ii*nzz] = vex[(border.ize-1) +  ii*nzz];
-			}
-		}	
-}
-
-double fricker(float t,float freq){
-		double beta=PI*freq*t;
-		double ricker;	
-		ricker=(-sqrt(2.0)*beta + 1.0)*(1.0 + sqrt(2.0)*beta)*exp(-(beta*beta));
-		return ricker;
-}
-
-
 void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* secdir){
 // wavefield 
 	float* p1,*p2;
@@ -324,7 +271,19 @@ void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* se
 }
 
 
-
+int main(int argc,char** argv){
+	char* veldir="/export/home/joan/Seismic-Datasets/BP/vp.rsf@";
+	char* velhdr="/export/home/joan/Seismic-Datasets/BP/vel_hdr.txt";
+	char* paramdir="/export/home/joan/Seismic-Datasets/BP/geometry.txt";
+	char* secdir="/scratch/joan/bp_cshot.bin";
+	int	nvar_funcall=4;
+	if((argc-1)!=nvar_funcall){
+		printf("You must provide velocity,velocity header, aquisition header and section saving dir i				n that order!!\n");
+		exit(EXIT_FAILURE);
+	}
+	modelling(argv[1],argv[2],argv[3],argv[4]);
+	return 0;
+}
 
 
 
