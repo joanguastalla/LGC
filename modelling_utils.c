@@ -10,13 +10,7 @@
 #define sec2ms 1.0e6
 #define cfl 0.25
 #define nderiv2 3
-#define NB 100
-typedef struct b{
-	int ixb;
-	int izb;
-	int ize;
-	int nb;
-};
+#define NB 200
 void velextension(float* vex,float* v,int nx,int nz,struct b border,int nxx,int nzz){
 	int i0;
 	i0=(border.ixb+1)*nzz + border.izb+1;
@@ -62,7 +56,7 @@ double fricker(float t,float freq){
 }
 
 
-void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* secdir){
+int acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* secdir){
 // wavefield 
 	float* p1,*p2;
 
@@ -86,6 +80,7 @@ void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* se
 	float xsmax,xsmin,dxs,zs,hmin,hmax,dh,zg ;
 	float freq,ttotal;
 	float* ricker;
+	float* seismogram;
 	
 // Stability parameters
 	int ns,nt,ndt;
@@ -107,7 +102,7 @@ void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* se
 // Aquisiton parameters reading
 	if (fscanf(PARAM,"%f %f %f %f %f %f %f %f %f %f",&xsmin,&xsmax,&dxs,&zs,&hmin,&hmax,&dh,&zg,&freq,&ttotal) < nparam){
 			printf("Too few acquistion parameters!");
-			return;
+			return 0;
 	}
 
 // Velocity header reading
@@ -119,7 +114,7 @@ void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* se
 		printf("%f\n",dz);
 		printf("%f\n",dx);
 		printf("Missing velocity model header parameters!");
-		return;
+		return 0;
 	}
 
 
@@ -180,7 +175,7 @@ void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* se
 	}
 	if(dx > dxmax){
 		printf("Frequency is too high");
-		return;
+		return 0;
 	}
 
 // Extending velocity model *******************************************
@@ -241,8 +236,8 @@ void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* se
 	idxh=(int) (dh/dx);
 	ng=(int) ((hmax-hmin)/dh);
 	ng+=1;
+	float section[ns*ng];
 	int igeo[ng];
-	float section[ng];
 
 // Absorption border parameters
 	int ix,iz;
@@ -314,13 +309,14 @@ void acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* se
 				if((int) modulo==0){
 					// Section writing
 					for(int ii=0;ii<ng;ii++){
-						section[ii]=p1[igeo[ii]];
+						section[itrec + ns*ii]=p1[igeo[ii]];
 					}
-					fwrite(section,sizeof(float),ng,SECTION);
 					itrec++;
 				}
 		}
+		  fwrite(section,sizeof(float),ns*ng,SECTION);
 	}
+	return ns;
 }
 
 

@@ -10,7 +10,7 @@
 #define sec2ms 1.0e6
 #define cfl 0.25
 #define nderiv2 3
-#define NB 100
+#define NB 200
 			/*
 			// One-way border condition
 	
@@ -113,6 +113,7 @@ int main(){
 	float xsmax,xsmin,dxs,zs,hmin,hmax,dxh,zg;
 	float freq,ttotal;
 	double* ricker;
+	float* sismogram;
 	
 // Stability parameters
 	int ns,nt,nt_rtm,ndt,ndt_rtm,it_rtm=0;
@@ -134,11 +135,11 @@ int main(){
 	char* sectiondir;
 	char* imagedir;
 //	param_dir="/export/home/joan/ProjetoFWI/param.txt" ;
-	param_dir="/export/home/joan/Seismic-Datasets/BP/geometry.txt" ;
+	param_dir="/export/home/joan/ProjetoFWI/models/geometry.txt" ;
  //   velbin = "/export/home/joan/ProjetoFWI/models/refplane.bin";
 //	velhdr = "/export/home/joan/ProjetoFWI/models/Vel.txt";
-	velbin="/export/home/joan/Seismic-Datasets/BP/vp.rsf@";
-	velhdr="/export/home/joan/Seismic-Datasets/BP/vel_hdr.txt";
+	velbin="/export/home/joan/ProjetoFWI/models/vel.bin";
+	velhdr="/export/home/joan/ProjetoFWI/models/vel.hdr";
 	velextend_path="./velextend.bin";
 	rickerdir="/export/home/joan/ProjetoFWI/models/ricker.bin";
 	moviedir="/scratch/joan/wavemovie.bin";
@@ -153,13 +154,14 @@ int main(){
     FILE* wavemovie;
 	FILE* section;
 	FILE* IMAGE;
+	FILE* SISMOGRAM;
 	// Alocação de matrizes e vetores
     
 //Leitura do modelo de velocidade: hdr e bin
     velfile_hdr=fopen(velhdr,"r");    
     velfile=fopen(velbin,"rb");
 	param=fopen(param_dir,"r");
-	fscanf(param,"%f %f %f %f %f %f %f %f %f %f",&xsmax,&xsmin,&dxs,&zs,&hmin,&hmax,&dxh,&zg,&freq,&ttotal);
+	fscanf(param,"%f %f %f %f %f %f %f %f %f %f",&xsmin,&xsmax,&dxs,&zs,&hmin,&hmax,&dxh,&zg,&freq,&ttotal);
 	fscanf(velfile_hdr,"%i %i %f %f %f %f",&nz,&nx,&z0,&x0,&dz,&dx);
 	ng=(int) (hmax - hmin)/dxh;
 	ng+=1;
@@ -323,9 +325,10 @@ for (iz = 0; iz < border.nb; ++iz) {
 }	
 
 
-
+sismogram=calloc(sizeof(float),ns*ng);
 memset(image,0,sizeof(float)*nx*nz);
 wavemovie=fopen(moviedir,"wb");
+SISMOGRAM=fopen("/scratch/joan/cshot.bin","wb");
 // Forward modelling --------------------------------------------------------- 
 for(int is=0;is<nshots;is++){
 		printf("is:%d-%d\n",is,nshots);
@@ -376,6 +379,9 @@ for(int is=0;is<nshots;is++){
 			if((int) modulo==0){
 				// Wavemovie writing
 				im=0;
+				for (int ig = 0;ig < ng;++ig){
+					sismogram[it_rtm + ig*ns]=p1[igeo[ig]];
+				}
 				for(int imx=0;imx<nx;imx++){
 					for(int imz=0;imz<nz;imz++){
 						p1aux[im]=p1[i0_model + imz + imx*nzz];
@@ -387,6 +393,7 @@ for(int is=0;is<nshots;is++){
 				it_rtm++;
 			}
 	}
+	fwrite(sismogram,sizeof(float),ns*ng,SISMOGRAM);
 	memset(p1,0,sizeof(float)*nxx*nzz);
 	memset(p2,0,sizeof(float)*nxx*nzz);
 	it_rtm=0;
