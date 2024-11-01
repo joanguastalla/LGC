@@ -10,7 +10,21 @@
 #define sec2ms 1.0e6
 #define cfl 0.25
 #define nderiv2 3
-#define NB 200
+#define NB 100
+
+float lininterpol(float* y,int nx,float x,float dx){
+	int n=x/dx;
+	float yout;
+	if(n>=nx){
+		return y[nx-1];
+	}
+	if(n<0){
+		return y[0];
+	}
+	yout=(y[n] + y[n+1])/2;
+	return yout;
+}
+
 void velextension(float* vex,float* v,int nx,int nz,struct b border,int nxx,int nzz){
 	int i0;
 	i0=(border.ixb+1)*nzz + border.izb+1;
@@ -56,6 +70,252 @@ double fricker(float t,float freq){
 }
 
 
+int acoustic_modelling2Dshot(char* velhdr,char* veldir,char* aquisitionhdr,char* secdir,int ifonte){
+// wavefield 
+	float* p1,*p2;
+
+// Parameters on original velocity model 
+    int nx,nz;    
+	float dx,dz,x0,z0;
+	float* vel;
+
+// Parameters on extended velocity model
+	int nxx,nzz;
+	struct b border;
+	float* velextend;
+	float* dswap;
+	int i0_model,imodel;
+	float laplacian;
+
+
+// Aquisition parameters
+	int isrc,isx,isz;
+	int it0,itrec;
+	float xsmax,xsmin,dxs,zs,hmin,hmax,dh,zg ;
+	float freq,ttotal;
+	double* ricker;
+	
+// Stability parameters
+	int ns,nt,ndt;
+	float maxv,minv;
+	float dxmax,dt;
+//	float deriv2[nderiv2]={-3.02359410, 1.75000000,-0.291666667, 0.0648148148,-0.0132575758,0.0021212122,-0.000226625227,0.0000118928690};
+	float deriv2[nderiv2]={-5.0/2,4.0/3,-1.0/12};
+	float deriv2_sum=0;
+
+//Leitura do modelo de velocidade: hdr e bin
+	int nparam,nvparam;
+	FILE* VELHDR,*VELDIR,*PARAM,*SECTION;
+    nparam=10;
+	nvparam=6;
+	VELHDR=fopen(velhdr,"r");  
+    VELDIR=fopen(veldir,"rb");
+	PARAM=fopen(aquisitionhdr,"r");
+
+// Aquisiton parameters reading
+	if (fscanf(PARAM,"%f %f %f %f %f %f %f %f %f %f",&xsmin,&xsmax,&dxs,&zs,&hmin,&hmax,&dh,&zg,&freq,&ttotal) < nparam){
+			printf("Too few acquistion parameters!");
+			return 0;
+	}
+
+// Velocity header reading
+	if(fscanf(VELHDR,"%i %i %f %f %f %f",&nz,&nx,&z0,&x0,&dz,&dx)< nvparam){
+		printf("%d\n",nz);
+		printf("%d\n",nx);
+		printf("%f\n",z0);
+		printf("%f\n",x0);
+		printf("%f\n",dz);
+		printf("%f\n",dx);
+		printf("Missing velocity model header parameters!");
+		return 0;
+	}
+
+
+	vel=malloc(sizeof(float)*nx*nz);
+	if(vel==NULL){
+		printf("Fail to allocate memory");
+		exit(EXIT_FAILURE);
+	}
+	if(!fread(vel,sizeof(float),nx*nz,VELDIR)){
+		printf("Error reading file!!\n");
+		exit(EXIT_FAILURE);
+	}
+	fclose(VELDIR);
+	fclose(VELHDR);
+	fclose(PARAM);
+
+//  Maximum and minimum of velocity model ******************************
+	maxv=vel[0];
+	minv=vel[0];
+	for(int ii=0;ii<nx*nz;ii++){
+		if(maxv < vel[ii]){
+			maxv=vel[ii];
+		}
+		if(minv > vel[ii]){
+			minv=vel[ii];
+		}
+	}
+	maxv=2400;
+// Setting parameters dt,dx for stability of FD
+
+	ns= (int) (ttotal/dtrec) ;
+	ns+=1;
+	dxmax=minv/(6.0*freq);
+	for(int ii=0;ii<nderiv2;ii++){
+		deriv2_sum+=abs(deriv2[ii]);
+	}
+	dt=cfl*sqrt(2.0/deriv2_sum)*dx/maxv;
+	ndt=(int)(dtrec/dt);
+	ndt+=1;
+
+	// Chosing dt for modelling to be a a divisor of dtrec
+	if(ndt > 1){
+		dt=(dtrec/ndt);
+	}else{
+		dt=dtrec;
+	}
+
+
+	nt=(int)(ttotal/dt);
+	nt+=1;
+	ricker=malloc(sizeof(double)*nt);
+
+	
+// Half duration of ricker number of indexes it0	
+	it0 = floor(sqrt(6.0/PI)/(freq*dt)); 
+	for(int it=0;it<nt;it++){
+		ricker[it]=fricker((it-it0)*dt,freq);
+	}
+	if(dx > dxmax){
+		printf("Frequency is too high");
+		return 0;
+	}
+
+// Extending velocity model *******************************************
+    border.nb=NB;
+	nxx=2*border.nb + nx;
+    nzz=2*border.nb + nz;
+    border.ixb=border.nb -1;
+	border.izb=border.ixb;
+	border.ize=nzz - border.nb;
+   	
+	velextend=malloc(sizeof(float)*nxx*nzz);
+	velextension(velextend,vel,nx,nz,border,nxx,nzz);
+	
+   
+
+
+// Scaling  extended velocity for computational resource economy
+	for(int ii=0;ii<nxx;ii++){
+		for(int jj=0;jj<nzz;jj++){
+			velextend[jj + ii*nzz]= pow(velextend[jj + ii*nzz],2.0)*pow(dt/dx,2.0);
+		}
+	}
+
+// Wavefield variables 
+	p1=calloc(nxx*nzz,sizeof(float));
+	p2=calloc(nxx*nzz,sizeof(float));
+    i0_model=nzz*(border.ixb+1) + (border.izb + 1); 
+	xsmin+=dxs*ifonte;
+// Index of source in the model
+	isx=(int) (xsmin/dx);  
+	isz=(int) (zs/dz);	   
+	isrc= i0_model + isz +  nzz*isx;
+
+// Receivers parameters
+	int ng,idxh;
+	float modulo;
+	idxh=(int) (dh/dx);
+	ng=(int) ((hmax-hmin)/dh);
+	ng+=1;
+	float section[ns*ng];
+	int igeo[ng];
+
+// Absorption border parameters
+	int ix,iz;
+	float gamma_x[nxx];
+	float gamma_z[nzz];
+	float gamma, mgamma, invpgamma, beta;
+
+	beta=PI*freq*dt;
+	for(iz = 0; iz < nzz; ++iz) {
+		gamma_z[iz]=0.0;
+	}
+	for (ix = 0; ix < nxx; ++ix){
+		gamma_x[ix]=0.0;
+	}
+
+	for (ix = 0; ix < border.nb; ++ix) {
+		gamma=beta*pow((((float) (ix+1))/((float) border.nb)),2.0);
+		gamma_x[border.ixb - ix]=gamma;
+		gamma_x[(border.ixb + nx + 1) + ix]=gamma;
+	}	
+
+	for (iz = 0; iz < border.nb; ++iz) {
+		gamma=beta*pow((((float) (iz+1))/((float) border.nb)),2.0);
+		gamma_z[border.izb - iz]=gamma;
+		gamma_z[(border.izb + nz + 1) + iz]=gamma;
+	}	
+
+	SECTION=fopen(secdir,"wb");
+
+// Forward modelling --------------------------------------------------------- 
+			itrec=0;
+			for(int iswap=0;iswap<nxx*nzz;iswap++){
+						p1[iswap]=0.0;
+						p2[iswap]=0.0;
+			}
+			isrc=i0_model + isz +  nzz*isx;
+			for(int ig=0;ig<ng;ig++){
+				igeo[ig]=i0_model + (zg/dz) + nzz*(isx) + nzz*(hmin/dx)
+						 + ig*idxh*nzz;
+			}
+		// Forward modelling --------------------------------------------------------- 
+			for(int it=0;it<nt;++it){
+					p1[isrc]+= -pow(dx,2.0)*ricker[it]*velextend[isrc];
+		// Laplacian and field update
+					for(ix=(nderiv2-1);ix<(nxx-nderiv2);ix++){
+						for(iz=(nderiv2-1);iz<(nzz-nderiv2);iz++){
+							gamma=gamma_x[ix] + gamma_z[iz];
+							mgamma=-(1-gamma)/(1+gamma);
+							invpgamma=0.5*(1-mgamma);
+							imodel= iz + nzz*ix;
+							laplacian=2*deriv2[0]*p2[imodel];
+							for(int iconv=1;iconv < nderiv2;iconv++){
+								laplacian+=deriv2[iconv]*p2[imodel - iconv];
+								laplacian+=deriv2[iconv]*p2[imodel + iconv];
+								laplacian+=deriv2[iconv]*p2[imodel - nzz*iconv];
+								laplacian+=deriv2[iconv]*p2[imodel + nzz*iconv];
+							}
+							p1[imodel]= mgamma*p1[imodel] + invpgamma*(2.0*p2[imodel] +
+							velextend[imodel]*laplacian);
+						}	
+					}
+					
+				dswap=p2;
+				p2=p1;
+				p1=dswap;
+				modulo=fmod(it,ndt);
+				if((int) modulo==0){
+					// Section writing
+					for(int ii=0;ii<ng;ii++){
+						section[itrec + ns*ii]=p1[igeo[ii]];
+					}
+					itrec++;
+				}
+		}
+		  fwrite(section,sizeof(float),ns*ng,SECTION);
+	
+	fclose(SECTION);
+	free(p1);
+	free(p2);
+	free(vel);
+	free(velextend);
+	free(ricker);
+	return ns;
+}
+
+
 int acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* secdir){
 // wavefield 
 	float* p1,*p2;
@@ -75,12 +335,11 @@ int acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* sec
 
 
 // Aquisition parameters
-	int isrc,isx,isz,idxs,nshots;
+	int isrc,isx,isz,nshots;
 	int it0,itrec;
 	float xsmax,xsmin,dxs,zs,hmin,hmax,dh,zg ;
 	float freq,ttotal;
-	float* ricker;
-	float* seismogram;
+	double* ricker;
 	
 // Stability parameters
 	int ns,nt,ndt;
@@ -217,24 +476,20 @@ int acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* sec
 	}
 
 // Wavefield variables 
-	p1=calloc(nxx*nzz,sizeof(double));
-	p2=calloc(nxx*nzz,sizeof(double));
+	p1=calloc(nxx*nzz,sizeof(float));
+	p2=calloc(nxx*nzz,sizeof(float));
     i0_model=nzz*(border.ixb+1) + (border.izb + 1); 
 	printf("nt:%d\n",nt);
-
 // Index of source in the model
 	isx=(int) (xsmin/dx);  
 	isz=(int) (zs/dz);	   
 	isrc= i0_model + isz +  nzz*isx;
-	idxs=(int)(dxs/dx);
-	nshots=(int) ((xsmax - xsmin)/dxs);
-	nshots+=1;
 
 // Receivers parameters
 	int ng,idxh;
 	float modulo;
 	idxh=(int) (dh/dx);
-	ng=(int) ((hmax-hmin)/dh);
+	ng=(int)((hmax-hmin)/dh);
 	ng+=1;
 	float section[ns*ng];
 	int igeo[ng];
@@ -264,20 +519,20 @@ int acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* sec
 		gamma_z[border.izb - iz]=gamma;
 		gamma_z[(border.izb + nz + 1) + iz]=gamma;
 	}	
-
+	nshots=(xsmax-xsmin)/dxs;
+	nshots++;
 	printf("nshots:%d\n",nshots);
 	SECTION=fopen(secdir,"wb");
 // Forward modelling --------------------------------------------------------- 
 	for(int is=0;is<nshots;is++){
-			printf("is:%d-%d\n",(is+1),nshots);
 			itrec=0;
 			for(int iswap=0;iswap<nxx*nzz;iswap++){
 						p1[iswap]=0.0;
 						p2[iswap]=0.0;
 			}
-			isrc=i0_model + isz +  nzz*isx + nzz*idxs*is;
+			isrc=i0_model + isz +  nzz*isx;
 			for(int ig=0;ig<ng;ig++){
-				igeo[ig]=i0_model + (zg/dz) + nzz*(isx + idxs*is) + nzz*(hmin/dx)
+				igeo[ig]=i0_model + (zg/dz) + nzz*(isx) + nzz*(hmin/dx)
 						 + ig*idxh*nzz;
 			}
 		// Forward modelling --------------------------------------------------------- 
@@ -314,8 +569,15 @@ int acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* sec
 					itrec++;
 				}
 		}
-		  fwrite(section,sizeof(float),ns*ng,SECTION);
+	 	fwrite(section,sizeof(float),ns*ng,SECTION);
 	}
+	
+	fclose(SECTION);
+	free(p1);
+	free(p2);
+	free(vel);
+	free(velextend);
+	free(ricker);
 	return ns;
 }
 
@@ -324,4 +586,299 @@ int acoustic_modelling2D(char* velhdr,char* veldir,char* aquisitionhdr,char* sec
 
 
 
+
+
+
+float* rtm(char* velhdr,char* veldir,char* aquisitionhdr,char* secdir,float* source,int ifonte){
+// wavefield 
+	float *p1,*p2,*image,*pfield,*pderiv;
+
+// Parameters on original velocity model 
+    int nx,nz,nt_rtm;    
+	float dx,dz,x0,z0;
+	float* vel;
+
+// Parameters on extended velocity model
+	int nxx,nzz;
+	struct b border;
+	float* velextend;
+	float* dswap;
+	int i0_model,imodel;
+	float laplacian,paux;
+
+
+// Aquisition parameters
+	int isrc,isx,isz,nshots;
+	int it0;
+	float xsmax,xsmin,dxs,zs,hmin,hmax,dh,zg ;
+	float freq,ttotal;
+	double* ricker;
+	
+// Stability parameters
+	int ns,nt,ndt;
+	float maxv,minv;
+	float dxmax,dt;
+//	float deriv2[nderiv2]={-3.02359410, 1.75000000,-0.291666667, 0.0648148148,-0.0132575758,0.0021212122,-0.000226625227,0.0000118928690};
+	float deriv2[nderiv2]={-5.0/2,4.0/3,-1.0/12};
+	float deriv2_sum=0;
+
+//Leitura do modelo de velocidade: hdr e bin
+	int nparam,nvparam;
+	FILE* VELHDR,*VELDIR,*PARAM;
+    nparam=10;
+	nvparam=6;
+	VELHDR=fopen(velhdr,"r");  
+    VELDIR=fopen(veldir,"rb");
+	PARAM=fopen(aquisitionhdr,"r");
+
+// Aquisiton parameters reading
+	if (fscanf(PARAM,"%f %f %f %f %f %f %f %f %f %f",&xsmin,&xsmax,&dxs,&zs,&hmin,&hmax,&dh,&zg,&freq,&ttotal) < nparam){
+			printf("Too few acquistion parameters!");
+			exit(EXIT_FAILURE) ;
+	}
+
+// Velocity header reading
+	if(fscanf(VELHDR,"%i %i %f %f %f %f",&nz,&nx,&z0,&x0,&dz,&dx)< nvparam){
+		printf("%d\n",nz);
+		printf("%d\n",nx);
+		printf("%f\n",z0);
+		printf("%f\n",x0);
+		printf("%f\n",dz);
+		printf("%f\n",dx);
+		printf("Missing velocity model header parameters!");
+		exit(EXIT_FAILURE) ;
+	}
+
+
+	vel=malloc(sizeof(float)*nx*nz);
+	if(vel==NULL){
+		printf("Fail to allocate memory");
+		exit(EXIT_FAILURE);
+	}
+	if(!fread(vel,sizeof(float),nx*nz,VELDIR)){
+		printf("Error reading file!!\n");
+		exit(EXIT_FAILURE);
+	}
+	fclose(VELDIR);
+	fclose(VELHDR);
+	fclose(PARAM);
+
+//  Maximum and minimum of velocity model ******************************
+	maxv=vel[0];
+	minv=vel[0];
+	for(int ii=0;ii<nx*nz;ii++){
+		if(maxv < vel[ii]){
+			maxv=vel[ii];
+		}
+		if(minv > vel[ii]){
+			minv=vel[ii];
+		}
+	}
+	
+// Setting parameters dt,dx for stability of FD
+
+	ns= (int) (ttotal/dtrec) ;
+	ns+=1;
+	dxmax=minv/(6.0*freq);
+	for(int ii=0;ii<nderiv2;ii++){
+		deriv2_sum+=abs(deriv2[ii]);
+	}
+	dt=cfl*sqrt(2.0/deriv2_sum)*dx/maxv;
+	ndt=(int)(dtrec/dt);
+	ndt+=1;
+
+	// Chosing dt for modelling to be a a divisor of dtrec
+	if(ndt > 1){
+		dt=(dtrec/ndt);
+	}else{
+		dt=dtrec;
+	}
+
+
+	nt=(int)(ttotal/dt);
+	nt+=1;
+	ricker=malloc(sizeof(double)*nt);
+
+	
+// Half duration of ricker number of indexes it0	
+	it0 = floor(sqrt(6.0/PI)/(freq*dt)); 
+	for(int it=0;it<nt;it++){
+		ricker[it]=fricker((it-it0)*dt,freq);
+	}
+	if(dx > dxmax){
+		printf("Frequency is too high");
+		exit(EXIT_FAILURE);
+	}
+
+// Extending velocity model *******************************************
+    border.nb=NB;
+	nxx=2*border.nb + nx;
+    nzz=2*border.nb + nz;
+    border.ixb=border.nb -1;
+	border.izb=border.ixb;
+	border.ize=nzz - border.nb;
+   	
+	velextend=malloc(sizeof(float)*nxx*nzz);
+	velextension(velextend,vel,nx,nz,border,nxx,nzz);
+
+
+
+// Scaling  extended velocity for computational resource economy
+	for(int ii=0;ii<nxx;ii++){
+		for(int jj=0;jj<nzz;jj++){
+			velextend[jj + ii*nzz]= pow(velextend[jj + ii*nzz],2.0)*pow(dt/dx,2.0);
+		}
+	}
+
+// Wavefield variables 
+	p1=calloc(nxx*nzz,sizeof(float));
+	p2=calloc(nxx*nzz,sizeof(float));
+	pderiv=calloc(nxx*nzz,sizeof(float));
+	image=calloc(nx*nz,sizeof(float));
+    i0_model=nzz*(border.ixb+1) + (border.izb + 1); 
+	xsmin+=dxs*ifonte;
+// Index of source in the model
+	isx=(int) (xsmin/dx);  
+	isz=(int) (zs/dz);	   
+	isrc= i0_model + isz +  nzz*isx;
+	nshots=1;
+// Receivers parameters
+	int ng,idxh;
+	float modulo;
+	idxh=(int) (dh/dx);
+	ng=(int) ((hmax-hmin)/dh);
+	ng+=1;
+	int igeo[ng];
+
+// Absorption border parameters
+	int ix,iz;
+	float gamma_x[nxx];
+	float gamma_z[nzz];
+	float gamma, mgamma, invpgamma, beta;
+	nt_rtm=(int)(ttotal/dtrtm);
+	nt_rtm+=1;
+	beta=PI*freq*dt;
+	for(iz = 0; iz < nzz; ++iz) {
+		gamma_z[iz]=0.0;
+	}
+	for (ix = 0; ix < nxx; ++ix){
+		gamma_x[ix]=0.0;
+	}
+
+	for (ix = 0; ix < border.nb; ++ix) {
+		gamma=beta*pow((((float) (ix+1))/((float) border.nb)),2.0);
+		gamma_x[border.ixb - ix]=gamma;
+		gamma_x[(border.ixb + nx + 1) + ix]=gamma;
+	}	
+
+	for (iz = 0; iz < border.nb; ++iz) {
+		gamma=beta*pow((((float) (iz+1))/((float) border.nb)),2.0);
+		gamma_z[border.izb - iz]=gamma;
+		gamma_z[(border.izb + nz + 1) + iz]=gamma;
+	}	
+	int it_rtm,ndt_rtm;
+	ndt_rtm=(int)(dtrtm/dt);
+	ndt_rtm+=1;
+	pfield=malloc(sizeof(float)*nx*nz*nt);
+// Forward modelling --------------------------------------------------------- 
+			it_rtm=0;
+			for(int iswap=0;iswap<nxx*nzz;iswap++){
+						p1[iswap]=0.0;
+						p2[iswap]=0.0;
+			}
+			isrc=i0_model + isz +  nzz*isx;
+			for(int ig=0;ig<ng;ig++){
+				igeo[ig]=i0_model + (zg/dz) + nzz*(isx) + nzz*(hmin/dx)
+						 + ig*idxh*nzz;
+			}
+
+		// Forward modelling --------------------------------------------------------- 
+			for(int it=0;it<nt;++it){
+						p1[isrc]+= -pow(dx,2.0)*ricker[it]*velextend[isrc];
+		// Laplacian and field update
+					for(ix=(nderiv2-1);ix<(nxx-nderiv2);ix++){
+						for(iz=(nderiv2-1);iz<(nzz-nderiv2);iz++){
+							gamma=gamma_x[ix] + gamma_z[iz];
+							mgamma=-(1-gamma)/(1+gamma);
+							invpgamma=0.5*(1-mgamma);
+							imodel= iz + nzz*ix;
+							laplacian=2*deriv2[0]*p2[imodel];
+							for(int iconv=1;iconv < nderiv2;iconv++){
+								laplacian+=deriv2[iconv]*p2[imodel - iconv];
+								laplacian+=deriv2[iconv]*p2[imodel + iconv];
+								laplacian+=deriv2[iconv]*p2[imodel - nzz*iconv];
+								laplacian+=deriv2[iconv]*p2[imodel + nzz*iconv];
+							}
+							paux=mgamma*p1[imodel] + invpgamma*(2.0*p2[imodel] +
+							velextend[imodel]*laplacian);
+							pderiv[imodel]=(p1[imodel] - 2.0*p2[imodel] + paux)/(dt*dt);
+							p1[imodel]=paux;						
+						}	
+					}
+				dswap=p2;
+				p2=p1;
+				p1=dswap;
+				for(int imx=0;imx<nx;imx++){
+					for(int imz = 0; imz < nz; ++imz){
+						pfield[imz + imx*nz + it*nx*nz]=pderiv[i0_model + imz + imx*nzz];
+					}
+				}
+		}
+	int index;
+	// Backward modelling
+	for(int it=0;it <(nt-2);it++){
+		for(int ig=0;ig<ng;ig++){
+			index=(zg/dz) + (isx + (hmin/dx) + ig*idxh)*nz;
+			p1[igeo[ig]]+= -pow(dx,2.0)*lininterpol(source + ns*ig,ns,((nt-2)-it)*dt,dtrec)*velextend[igeo[ig]];
+			//p1[igeo[ig]]+= -pow(dx,2.0)*pfield[index + nx*nz*((nt-1)-it)]*velextend[igeo[ig]];
+		}
+		// Laplacian and field update
+		for(int ix=(nderiv2-1);ix<(nxx-nderiv2);ix++){
+			for(int iz=(nderiv2-1);iz<(nzz-nderiv2);iz++){
+				gamma=gamma_x[ix] + gamma_z[iz];
+				mgamma=-(1-gamma)/(1+gamma);
+				invpgamma=0.5*(1-mgamma);
+				imodel= iz + nzz*ix;
+				laplacian=2*deriv2[0]*p2[imodel];
+				for(int iconv=1;iconv < nderiv2;iconv++){
+					laplacian+=deriv2[iconv]*p2[imodel - iconv];
+					laplacian+=deriv2[iconv]*p2[imodel + iconv];
+					laplacian+=deriv2[iconv]*p2[imodel - nzz*iconv];
+					laplacian+=deriv2[iconv]*p2[imodel + nzz*iconv];
+				}
+				p1[imodel]= mgamma*p1[imodel] + invpgamma*(2.0*p2[imodel] +
+				velextend[imodel]*laplacian);
+			}	
+		}
+		modulo=fmod(it,ndt_rtm);
+		dswap=p2;
+		p2=p1;
+		p1=dswap;
+		if((int) modulo==0){
+			for(int imx=0;imx<nx;++imx){
+				for(int imz=0;imz<nz;++imz){
+					imodel=imz + imx*nz;
+					image[imodel]+=pfield[imodel + ((nt-1)-it)*nx*nz]*
+					p1[i0_model + imz + imx*nzz];
+				}
+			}
+			it_rtm++;
+		}
+	}
+	for(int imx=0;imx<nx;++imx){
+			for(int imz=0;imz<nz;++imz){
+				imodel=imz + imx*nz;
+				image[imodel]/=(2*vel[imodel]*vel[imodel]*vel[imodel]);
+			}
+	}
+	
+	free(p1);
+	free(pderiv);
+	free(pfield);
+	free(p2);
+	free(vel);
+	free(velextend);
+	free(ricker);
+	return image;
+}
 
